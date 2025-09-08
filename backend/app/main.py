@@ -24,6 +24,52 @@ EXPECTED_COLUMNS = [
 	"TP Outflow",
 ]
 
+# Canonical India States and UTs (uppercase, standardized ampersands)
+_CANON_STATES = [
+	"ANDHRA PRADESH","ARUNACHAL PRADESH","ASSAM","BIHAR","CHHATTISGARH","GOA","GUJARAT","HARYANA","HIMACHAL PRADESH","JHARKHAND","KARNATAKA","KERALA","MADHYA PRADESH","MAHARASHTRA","MANIPUR","MEGHALAYA","MIZORAM","NAGALAND","ODISHA","PUNJAB","RAJASTHAN","SIKKIM","TAMIL NADU","TELANGANA","TRIPURA","UTTAR PRADESH","UTTARAKHAND","WEST BENGAL",
+	"ANDAMAN & NICOBAR ISLANDS","CHANDIGARH","DADRA & NAGAR HAVELI AND DAMAN & DIU","DELHI","JAMMU & KASHMIR","LADAKH","LAKSHADWEEP","PUDUCHERRY"
+]
+
+# Build a normalization map using simplified keys and common aliases/abbreviations
+_DEF_STATE_MAP = {}
+
+def _state_key(s: str) -> str:
+	k = s.upper()
+	k = k.replace("\xa0", " ").replace(".", " ")
+	k = re.sub(r"\s*&\s*", "&", k)
+	k = k.replace("AND", "&")
+	k = re.sub(r"\s+", "", k)
+	return k
+
+for name in _CANON_STATES:
+	_DEF_STATE_MAP[_state_key(name)] = name
+
+# Common aliases
+_aliases = {
+	"ORISSA": "ODISHA",
+	"NCTDELHI": "DELHI",
+	"NEWDELHI": "DELHI",
+	"DELHINCT": "DELHI",
+	"PONDICHERRY": "PUDUCHERRY",
+	"DADRA&NAGARHAVELI": "DADRA & NAGAR HAVELI AND DAMAN & DIU",
+	"DAMAN&DIU": "DADRA & NAGAR HAVELI AND DAMAN & DIU",
+	"DNHDD": "DADRA & NAGAR HAVELI AND DAMAN & DIU",
+	"J&K": "JAMMU & KASHMIR",
+	"J&KSTATE": "JAMMU & KASHMIR",
+	"JAMMUANDKASHMIR": "JAMMU & KASHMIR",
+	"JAMMU&KASHMIR": "JAMMU & KASHMIR",
+	"UTTARANCHAL": "UTTARAKHAND",
+}
+for k, v in _aliases.items():
+	_DEF_STATE_MAP[_state_key(k)] = v
+
+# Two-letter vehicle-like abbreviations (common shorthand)
+_abbrev = {
+	"AP": "ANDHRA PRADESH","AR": "ARUNACHAL PRADESH","AS": "ASSAM","BR": "BIHAR","CG": "CHHATTISGARH","GA": "GOA","GJ": "GUJARAT","HR": "HARYANA","HP": "HIMACHAL PRADESH","JH": "JHARKHAND","KA": "KARNATAKA","KL": "KERALA","MP": "MADHYA PRADESH","MH": "MAHARASHTRA","MN": "MANIPUR","ML": "MEGHALAYA","MZ": "MIZORAM","NL": "NAGALAND","OD": "ODISHA","OR": "ODISHA","PB": "PUNJAB","RJ": "RAJASTHAN","SK": "SIKKIM","TN": "TAMIL NADU","TS": "TELANGANA","TG": "TELANGANA","TR": "TRIPURA","UP": "UTTAR PRADESH","UK": "UTTARAKHAND","WB": "WEST BENGAL","AN": "ANDAMAN & NICOBAR ISLANDS","CH": "CHANDIGARH","DD": "DADRA & NAGAR HAVELI AND DAMAN & DIU","DN": "DADRA & NAGAR HAVELI AND DAMAN & DIU","DL": "DELHI","JK": "JAMMU & KASHMIR","LA": "LADAKH","LD": "LAKSHADWEEP","PY": "PUDUCHERRY"
+}
+for k, v in _abbrev.items():
+	_DEF_STATE_MAP[_state_key(k)] = v
+
 app = FastAPI(title="Report Comparator API")
 
 app.add_middleware(
@@ -78,21 +124,11 @@ def _normalize_yes_no_token(s: str) -> str:
 
 
 def _normalize_state_value(val: object) -> str:
-	s = str(val or "").strip().upper()
+	s = str(val or "").strip()
 	s = s.replace("\xa0", " ")
 	s = re.sub(r"\s+", " ", s)
-	s = s.replace(".", "")
-	s = re.sub(r"\s*&\s*", "&", s)
-	aliases = {
-		"J&K": "JAMMU & KASHMIR",
-		"J & K": "JAMMU & KASHMIR",
-		"J AND K": "JAMMU & KASHMIR",
-		"JANDK": "JAMMU & KASHMIR",
-		"J K": "JAMMU & KASHMIR",
-	}
-	if s in aliases:
-		return aliases[s]
-	return s
+	key = _state_key(s)
+	return _DEF_STATE_MAP.get(key, s.upper())
 
 
 def _normalize_zone_value(val: object) -> str:
