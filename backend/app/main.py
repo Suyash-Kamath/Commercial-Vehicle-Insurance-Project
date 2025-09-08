@@ -13,11 +13,11 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 from PIL import Image
 
-# Try to import OpenAI client (ensure you have the right SDK installed)
+# Try to import Gemini client
 try:
-    from openai import OpenAI
+    import google.generativeai as genai
 except Exception as e:
-    OpenAI = None  # we'll surface a clear error if OCR is attempted without client
+    genai = None  # we'll surface a clear error if OCR is attempted without client
 
 load_dotenv()
 
@@ -216,19 +216,6 @@ def read_main_report(file_bytes: bytes) -> pd.DataFrame:
     return df[EXPECTED_COLUMNS].copy()
 
 
-def _guess_mime_from_image(image_bytes: bytes) -> str:
-    try:
-        im = Image.open(io.BytesIO(image_bytes))
-        fmt = (im.format or '').lower()
-        if fmt in ("jpeg", "jpg"):
-            return "image/jpeg"
-        if fmt == "png":
-            return "image/png"
-        return "application/octet-stream"
-    except Exception:
-        return "application/octet-stream"
-
-
 def _extract_csv_from_text(text: str) -> str:
     if not text:
         return ""
@@ -244,75 +231,28 @@ def _extract_csv_from_text(text: str) -> str:
 
 # --- OCR ---
 def ocr_image_to_dataframe(image_bytes: bytes) -> pd.DataFrame:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not set")
-    if OpenAI is None:
-        raise HTTPException(status_code=500, detail="OpenAI Python client not installed or importable")
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not set")
+    if genai is None:
+        raise HTTPException(status_code=500, detail="Gemini Python client not installed or importable")
 
-    client = OpenAI(api_key=api_key)
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-    # First try: direct image payload (supported in newer SDKs). If the SDK doesn't accept bytes here,
-    # we'll catch the exception and fallback to base64 data-url approach for compatibility.
-    raw_text = None
-    mime = _guess_mime_from_image(image_bytes)
+    img = Image.open(io.BytesIO(image_bytes))
 
-    # Try direct image send
+    prompt_parts = [
+        "Extract the table strictly as CSV. The table should include the header row(s). The headers should match one of the following canonical column names exactly: "
+        + ", ".join(EXPECTED_COLUMNS) + ". Do not include any commentary or additional text. Just the CSV.",
+        img
+    ]
+
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Extract the table strictly as CSV. Prefer the following column names when present: "
-                        + ",".join(EXPECTED_COLUMNS)
-                        + ". Only output CSV, no commentary."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Return only CSV including the header row(s)."},
-                        # Direct image attempt (may raise if client doesn't support it)
-                        {"type": "image", "image": image_bytes},
-                    ],
-                },
-            ],
-        )
-        raw_text = completion.choices[0].message.content
-    except Exception as primary_exc:
-        # Fallback: use data URL base64 (compatibility). This works even on older clients.
-        try:
-            b64 = base64.b64encode(image_bytes).decode("utf-8")
-            data_url = f"data:{mime};base64,{b64}"
-            completion = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Extract the table strictly as CSV. Prefer the following column names when present: "
-                            + ",".join(EXPECTED_COLUMNS)
-                            + ". Only output CSV, no commentary."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Return only CSV including the header row(s)."},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    },
-                ],
-            )
-            raw_text = completion.choices[0].message.content
-        except Exception as fallback_exc:
-            # Report both for debugging
-            raise HTTPException(
-                status_code=500,
-                detail=f"OCR failed (direct attempt: {primary_exc}; fallback: {fallback_exc})"
-            )
+        response = model.generate_content(prompt_parts)
+        raw_text = response.text
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Gemini OCR failed: {exc}")
 
     csv_text = _extract_csv_from_text(raw_text)
     if not csv_text:
