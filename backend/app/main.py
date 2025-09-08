@@ -69,6 +69,30 @@ def normalize_and_rename_columns(df: pd.DataFrame) -> pd.DataFrame:
 	return df.rename(columns=renamed)
 
 
+def _normalize_key_value(val: object) -> str:
+	s = str(val or "").strip()
+	# Replace non-breaking spaces and collapse runs of whitespace
+	s = s.replace("\xa0", " ")
+	s = re.sub(r"\s+", " ", s)
+	# Standardize plus/minus spacing like "40k +" -> "40K+"
+	s = s.replace(" + ", "+").replace(" - ", "-")
+	# Uppercase for consistent matching
+	s = s.upper()
+	# Normalize YES/NO variations
+	if s in {"Y", "YES", "TRUE"}:
+		return "YES"
+	if s in {"N", "NO", "FALSE"}:
+		return "NO"
+	return s
+
+
+def _apply_key_normalization(df: pd.DataFrame, key_cols: list[str]) -> pd.DataFrame:
+	for c in key_cols:
+		if c in df.columns:
+			df[c] = df[c].map(_normalize_key_value)
+	return df
+
+
 def read_main_report(file_bytes: bytes) -> pd.DataFrame:
 	try:
 		df = pd.read_excel(io.BytesIO(file_bytes))
@@ -210,11 +234,15 @@ def compare_and_update(main_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFr
 
 	value_cols = [c for c in value_cols_all if c in new_df.columns]
 
-	main_num = main_df.copy()
-	new_num = new_df.copy()
-	for c in key_cols:
-		main_num[c] = main_num[c].astype(str).str.strip()
-		new_num[c] = new_num[c].astype(str).str.strip()
+	# Normalize keys aggressively for both frames
+	main_keys = main_df.copy()
+	new_keys = new_df.copy()
+	main_keys = _apply_key_normalization(main_keys, key_cols)
+	new_keys = _apply_key_normalization(new_keys, key_cols)
+
+	# Numeric copies for comparison
+	main_num = main_keys.copy()
+	new_num = new_keys.copy()
 	for v in value_cols_all:
 		if v in main_num.columns:
 			main_num[v] = main_num[v].apply(_parse_percent_like_to_float)
@@ -234,7 +262,7 @@ def compare_and_update(main_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFr
 
 	out = pd.DataFrame()
 	for c in key_cols_all:
-		out[c] = main_df[c] if c in main_df.columns else ""
+		out[c] = main_keys[c] if c in main_keys.columns else ""
 	out["OD Outflow"] = merged_num["OD Outflow_main"].apply(_format_percent_two_decimals) if "OD Outflow_main" in merged_num else ""
 	out["TP Outflow"] = merged_num["TP Outflow_main"].apply(_format_percent_two_decimals) if "TP Outflow_main" in merged_num else ""
 	out["Updated OD Outflow"] = merged_num.apply(lambda r: updated_or_blank(r, "OD Outflow"), axis=1)
