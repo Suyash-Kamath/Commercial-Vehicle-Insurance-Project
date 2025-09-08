@@ -1,0 +1,13 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #f6f7fb; color: #111; }
+.container { max-width: 880px; margin: 40px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 24px; }
+h1 { font-size: 20px; margin: 0 0 16px; }
+label { display: block; margin: 12px 0 6px; font-weight: 600; }
+input[type="file"] { display: block; margin-bottom: 12px; }
+.button { background: #0ea5e9; color: white; border: none; padding: 10px 14px; border-radius: 6px; cursor: pointer; }
+.button[disabled] { opacity: 0.6; cursor: not-allowed; }
+.row { display: flex; gap: 16px; align-items: center; }
+.note { font-size: 12px; color: #4b5563; margin-top: 4px; }
+.result { margin-top: 16px; }
+.link { color: #0ea5e9; text-decoration: none; }
+.error { color: #b91c1c; font-size: 14px; margin-top: 8px; }
