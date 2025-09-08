@@ -69,16 +69,7 @@ def normalize_and_rename_columns(df: pd.DataFrame) -> pd.DataFrame:
 	return df.rename(columns=renamed)
 
 
-def _normalize_key_value(val: object) -> str:
-	s = str(val or "").strip()
-	# Replace non-breaking spaces and collapse runs of whitespace
-	s = s.replace("\xa0", " ")
-	s = re.sub(r"\s+", " ", s)
-	# Standardize plus/minus spacing like "40k +" -> "40K+"
-	s = s.replace(" + ", "+").replace(" - ", "-")
-	# Uppercase for consistent matching
-	s = s.upper()
-	# Normalize YES/NO variations
+def _normalize_yes_no_token(s: str) -> str:
 	if s in {"Y", "YES", "TRUE"}:
 		return "YES"
 	if s in {"N", "NO", "FALSE"}:
@@ -86,10 +77,86 @@ def _normalize_key_value(val: object) -> str:
 	return s
 
 
+def _normalize_state_value(val: object) -> str:
+	s = str(val or "").strip().upper()
+	s = s.replace("\xa0", " ")
+	s = re.sub(r"\s+", " ", s)
+	s = s.replace(".", "")
+	s = re.sub(r"\s*&\s*", "&", s)
+	aliases = {
+		"J&K": "JAMMU & KASHMIR",
+		"J & K": "JAMMU & KASHMIR",
+		"J AND K": "JAMMU & KASHMIR",
+		"JANDK": "JAMMU & KASHMIR",
+		"J K": "JAMMU & KASHMIR",
+	}
+	if s in aliases:
+		return aliases[s]
+	return s
+
+
+def _normalize_zone_value(val: object) -> str:
+	s = str(val or "").strip().upper()
+	s = s.replace("\xa0", " ")
+	s = re.sub(r"\s+", " ", s)
+	s = s.replace("-", " ")
+	m = re.match(r"^(NORTH|SOUTH|EAST|WEST|CENTRAL)\s*([0-9])$", s)
+	if m:
+		name, num = m.group(1), m.group(2)
+		if name == "CENTRAL":
+			return "CENTRAL"
+		return f"{name} {num}"
+	return s
+
+
+def _normalize_weight_value(val: object) -> str:
+	s = str(val or "").strip().upper()
+	s = s.replace("\xa0", " ")
+	s = re.sub(r"\s+", " ", s)
+	# Remove spaces around dashes and plus
+	s = re.sub(r"\s*-\s*", "-", s)
+	s = re.sub(r"\s*\+\s*", "+", s)
+	# Canonical range mappings
+	patterns = [
+		(r"^12K-20K$", "12K-20K"),
+		(r"^20K-40K$", "20K-40K"),
+		(r"^3\.?5K-7\.?5K$", "3.5K-7.5K"),
+		(r"^7\.?5K-12K$", "7.5K-12K"),
+		(r"^40K\+?$", "40K+"),
+		(r"^3W\s*GCV$", "3W GCV"),
+		(r"^AUTO$", "AUTO"),
+		(r"^BOLERO$", "BOLERO"),
+		(r"^TAXI$", "TAXI"),
+		(r"^TRACTOR$", "TRACTOR"),
+		(r"^BELOW\s*2\.5\s*TONS?$", "BELOW 2.5 TONS"),
+		(r"^BELOW\s*3\.5\s*TONS?$", "BELOW 3.5 TONS"),
+	]
+	for pat, canon in patterns:
+		if re.match(pat, s, flags=re.IGNORECASE):
+			return canon
+	return s
+
+
+def _normalize_key_value(val: object, col_name: str) -> str:
+	s = str(val or "").strip()
+	s = s.replace("\xa0", " ")
+	s = re.sub(r"\s+", " ", s)
+	s = s.upper()
+	if col_name == "Weight":
+		return _normalize_weight_value(s)
+	if col_name == "Status":
+		return _normalize_yes_no_token(s)
+	if col_name in ("IIB State", "FGI State"):
+		return _normalize_state_value(s)
+	if col_name == "FGI Zone":
+		return _normalize_zone_value(s)
+	return s
+
+
 def _apply_key_normalization(df: pd.DataFrame, key_cols: list[str]) -> pd.DataFrame:
 	for c in key_cols:
 		if c in df.columns:
-			df[c] = df[c].map(_normalize_key_value)
+			df[c] = df[c].map(lambda v: _normalize_key_value(v, c))
 	return df
 
 
@@ -129,6 +196,8 @@ def _extract_csv_from_text(text: str) -> str:
 		return "\n".join(lines)
 	return text.strip()
 
+
+# --- OCR ---
 
 def ocr_image_to_dataframe(image_bytes: bytes) -> pd.DataFrame:
 	api_key = os.getenv("OPENAI_API_KEY")
@@ -171,8 +240,12 @@ def ocr_image_to_dataframe(image_bytes: bytes) -> pd.DataFrame:
 	available = [c for c in EXPECTED_COLUMNS if c in df.columns]
 	if not available:
 		raise HTTPException(status_code=400, detail="OCR result has no recognizable columns")
+	# Apply key normalization to OCR content too
+	key_cols = [c for c in ("Weight", "IIB State", "FGI State", "FGI Zone", "Status") if c in df.columns]
+	df = _apply_key_normalization(df, key_cols)
 	return df[available].copy()
 
+# --- Read new report (csv/xlsx/img) ---
 
 def read_new_report(file_name: str, file_bytes: bytes) -> pd.DataFrame:
 	name_lower = file_name.lower()
@@ -194,6 +267,9 @@ def read_new_report(file_name: str, file_bytes: bytes) -> pd.DataFrame:
 	available = [c for c in EXPECTED_COLUMNS if c in df.columns]
 	if not available:
 		raise HTTPException(status_code=400, detail="New report has no recognizable columns")
+	# Normalize keys early for non-image sources as well
+	key_cols = [c for c in ("Weight", "IIB State", "FGI State", "FGI Zone", "Status") if c in df.columns]
+	df = _apply_key_normalization(df, key_cols)
 	return df[available].copy()
 
 
