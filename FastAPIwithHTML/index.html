@@ -1,0 +1,375 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Policy Data Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f6fa;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .form-container {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+            color: #34495e;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        #status, #extracted-text, #parsed-data {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+            background-color: #ffffff;
+        }
+        #extracted-text, #parsed-data {
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .success {
+            color: #2ecc71;
+        }
+        #download-link {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: #2ecc71;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        #download-link:hover {
+            background-color: #27ae60;
+        }
+        #preview {
+            margin-top: 20px;
+            max-width: 100%;
+        }
+        #preview img {
+            max-width: 100%;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Policy Data to Excel Converter</h1>
+    <div class="form-container">
+        <label for="company-name">Company Name</label>
+        <input type="text" id="company-name" value="ICICI" placeholder="Enter company name (e.g., ICICI)">
+        
+        <label for="file-upload">Upload File (Text, Image, CSV, or Excel)</label>
+        <input type="file" id="file-upload" accept=".txt,.png,.jpg,.jpeg,.csv,.xlsx">
+        
+        <button id="process-btn" onclick="processFile()">Process File</button>
+    </div>
+    <div id="status"></div>
+    <div id="preview"></div>
+    <div id="extracted-text" style="display: none;"><strong>Extracted Text:</strong></div>
+    <div id="parsed-data" style="display: none;"><strong>Parsed Data:</strong></div>
+    <a id="download-link" style="display: none;"></a>
+
+    <script>
+        async function processFile() {
+            const companyName = document.getElementById('company-name').value.trim();
+            const fileInput = document.getElementById('file-upload');
+            const processBtn = document.getElementById('process-btn');
+            const statusDiv = document.getElementById('status');
+            const extractedTextDiv = document.getElementById('extracted-text');
+            const parsedDataDiv = document.getElementById('parsed-data');
+            const downloadLink = document.getElementById('download-link');
+            const previewDiv = document.getElementById('preview');
+
+            if (!companyName) {
+                statusDiv.innerHTML = '<span class="error">Please enter a company name.</span>';
+                return;
+            }
+            if (!fileInput.files[0]) {
+                statusDiv.innerHTML = '<span class="error">Please select a file.</span>';
+                return;
+            }
+
+            statusDiv.textContent = 'Processing...';
+            processBtn.disabled = true;
+            extractedTextDiv.style.display = 'none';
+            parsedDataDiv.style.display = 'none';
+            downloadLink.style.display = 'none';
+            previewDiv.innerHTML = '';
+
+            // Preview image if uploaded
+            if (fileInput.files[0].type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    previewDiv.innerHTML = `<img src="${reader.result}" alt="Uploaded Image">`;
+                };
+                reader.readAsDataURL(fileInput.files[0]);
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('company_name', companyName);
+
+            try {
+                const response = await fetch('http://localhost:8000/process-file/', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    statusDiv.innerHTML = `<span class="error">Error: ${errorData.detail}</span>`;
+                    processBtn.disabled = false;
+                    return;
+                }
+
+                const result = await response.json();
+                extractedTextDiv.innerHTML = `<strong>Extracted Text:</strong><br>${result.extracted_text || 'No extracted text available'}`;
+                extractedTextDiv.style.display = 'block';
+                parsedDataDiv.innerHTML = `<strong>Parsed Data:</strong><br><pre>${JSON.stringify(result.parsed_data || {}, null, 2)}</pre>`;
+                parsedDataDiv.style.display = 'block';
+
+                // Handle Excel file download
+                const excelBlob = new Blob([Uint8Array.from(atob(result.excel_file), c => c.charCodeAt(0))], {
+                    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                });
+                const url = window.URL.createObjectURL(excelBlob);
+                downloadLink.href = url;
+                downloadLink.download = 'policy_data.xlsx';
+                downloadLink.textContent = 'Download Excel File';
+                downloadLink.style.display = 'inline-block';
+                statusDiv.innerHTML = '<span class="success">Processing complete! Download the Excel file below.</span>';
+            } catch (error) {
+                statusDiv.innerHTML = `<span class="error">Error: ${error.message}. Please check your network, API key, or file content.</span>`;
+            } finally {
+                processBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html> -->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Policy Data Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f6fa;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .form-container {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+            color: #34495e;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        #status, #extracted-text, #parsed-data {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+            background-color: #ffffff;
+        }
+        #extracted-text, #parsed-data {
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .success {
+            color: #2ecc71;
+        }
+        #download-link {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: #2ecc71;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        #download-link:hover {
+            background-color: #27ae60;
+        }
+    </style>
+</head>
+<body>
+    <h1>Policy Data to Excel Converter</h1>
+    <div class="form-container">
+        <label for="company-name">Company Name</label>
+        <input type="text" id="company-name" value="ICICI" placeholder="Enter company name (e.g., ICICI)">
+        
+        <label for="file-upload">Upload File (Text, CSV, or Excel)</label>
+        <input type="file" id="file-upload" accept=".txt,.csv,.xlsx,.xls">
+        
+        <button id="process-btn" onclick="processFile()">Process File</button>
+    </div>
+    <div id="status"></div>
+    <div id="extracted-text" style="display: none;"><strong>Extracted Text:</strong></div>
+    <div id="parsed-data" style="display: none;"><strong>Parsed Data:</strong></div>
+    <a id="download-link" style="display: none;"></a>
+
+    <script>
+        async function processFile() {
+            const companyName = document.getElementById('company-name').value.trim();
+            const fileInput = document.getElementById('file-upload');
+            const processBtn = document.getElementById('process-btn');
+            const statusDiv = document.getElementById('status');
+            const extractedTextDiv = document.getElementById('extracted-text');
+            const parsedDataDiv = document.getElementById('parsed-data');
+            const downloadLink = document.getElementById('download-link');
+
+            if (!companyName) {
+                statusDiv.innerHTML = '<span class="error">Please enter a company name.</span>';
+                return;
+            }
+            if (!fileInput.files[0]) {
+                statusDiv.innerHTML = '<span class="error">Please select a file.</span>';
+                return;
+            }
+
+            statusDiv.textContent = 'Processing ' + fileInput.files[0].name + '...';
+            processBtn.disabled = true;
+            extractedTextDiv.style.display = 'none';
+            parsedDataDiv.style.display = 'none';
+            downloadLink.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('company_name', companyName);
+
+            try {
+                const response = await fetch('http://localhost:8000/process-file/', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    statusDiv.innerHTML = `<span class="error">Error processing ${fileInput.files[0].name}: ${errorData.detail}</span>`;
+                    console.error('Backend error:', errorData.detail);
+                    processBtn.disabled = false;
+                    return;
+                }
+
+                const result = await response.json();
+                extractedTextDiv.innerHTML = `<strong>Extracted Text:</strong><br>${result.extracted_text || 'No extracted text available'}`;
+                extractedTextDiv.style.display = 'block';
+                parsedDataDiv.innerHTML = `<strong>Parsed Data:</strong><br><pre>${JSON.stringify(result.parsed_data || {}, null, 2)}</pre>`;
+                parsedDataDiv.style.display = 'block';
+
+                // Handle Excel file download
+                const excelBlob = new Blob([Uint8Array.from(atob(result.excel_file), c => c.charCodeAt(0))], {
+                    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                });
+                const url = window.URL.createObjectURL(excelBlob);
+                downloadLink.href = url;
+                downloadLink.download = 'policy_data.xlsx';
+                downloadLink.textContent = 'Download Excel File';
+                downloadLink.style.display = 'inline-block';
+                statusDiv.innerHTML = `<span class="success">Processing complete for ${fileInput.files[0].name}! Download the Excel file below.</span>`;
+            } catch (error) {
+                statusDiv.innerHTML = `<span class="error">Error processing ${fileInput.files[0].name}: ${error.message}. Please check your network, API key, or file content.</span>`;
+                console.error('Fetch error:', error);
+            } finally {
+                processBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
